@@ -14,7 +14,7 @@ from pprint import pprint, pformat
 # np.random.seed(100)
 
 
-def main(n_rollouts: int, tree_depth: int, min_reward=0, max_reward=100):
+def main(n_rollouts: int, tree_depth: int, min_reward=0, max_reward=100, max_leaf_selections=10):
     """ Run MCTS with n_rollouts to max tree depth"""
 
     all_paths = list(itertools.product(*([BiTreeGame.possible_moves] * tree_depth)))
@@ -39,6 +39,7 @@ def main(n_rollouts: int, tree_depth: int, min_reward=0, max_reward=100):
             uct=True,
             c=np.sqrt(2),
             all_rew_possible=all_rewards,
+            max_leaf_selections=max_leaf_selections
         )
         mcts_move, q_values = mcts.run()
 
@@ -81,12 +82,10 @@ if __name__ == "__main__":
     p.add_argument("--tree-depth", "-td", type=int, default=12, required=False)
     p.add_argument("--min-reward", "-mnr", type=int, default=0, required=False)
     p.add_argument("--max-reward", "-mxr", type=int, default=100, required=False)
-
+    p.add_argument("--max-leaf-selections", "-mls", type=int, default=10, required=False)
     p.add_argument("--verbose", action="store_true", help="Show more extensive logs")
     args = p.parse_args()
-    logging.basicConfig(
-        level="DEBUG" if args.verbose else "ERROR", format="%(message)s"
-    )
+    logging.basicConfig(level="DEBUG" if args.verbose else "INFO", format="%(message)s")
     args_dict = vars(args)
     del args_dict["verbose"]
     main(**args_dict)

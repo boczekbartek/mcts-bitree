@@ -26,8 +26,17 @@ class TreeNode(object):
 
 
 class MCTS(object):
-    def __init__(self, game_state, n_iters, all_rew_possible, c=np.sqrt(2), uct=True):
+    def __init__(
+        self,
+        game_state,
+        n_iters,
+        all_rew_possible,
+        c=np.sqrt(2),
+        uct=True,
+        max_leaf_selections=5,
+    ):
         self.all_rewards = list()
+        self.max_leaf_selections = max_leaf_selections
         self.all_rew_possible = all_rew_possible
         self.c = c
         self.n_iters = n_iters
@@ -50,6 +59,7 @@ class MCTS(object):
     def selection_uct(self) -> int:
         leaf_node_found = False
         leaf_node_id = (0,)
+        restricted_nodes = set()
         while not leaf_node_found:
             node_id = leaf_node_id
             if not self.tree[node_id].has_children():
@@ -58,21 +68,55 @@ class MCTS(object):
                 logging.debug(
                     f"Node has no children: {self.tree[node_id].game_state.path}"
                 )
-
             else:
-                ucbs = [
-                    self.ucb(
-                        w=self.tree[child].w,
-                        n=self.tree[child].n,
-                        c=self.c,
-                        total_n=self.cur_n,
-                        node=child,
-                    )
+
+                if any(
+                    not self.tree[child].has_children()
                     for child in self.tree[node_id].children
-                ]
+                ):
+                    visits = [
+                        (self.tree[child].game_state.path, self.tree[child].n)
+                        for child in self.tree[node_id].children
+                    ]
+                    logging.debug(f"Leafes visits: {visits}")
+                    ucbs = [
+                        self.ucb(
+                            w=self.tree[child].w,
+                            n=self.tree[child].n,
+                            c=self.c,
+                            total_n=self.cur_n,
+                            node=child,
+                        )
+                        if self.tree[child].n <= self.max_leaf_selections
+                        and child not in restricted_nodes
+                        else -10000
+                        for child in self.tree[node_id].children
+                    ]
+                else:
+                    ucbs = [
+                        self.ucb(
+                            w=self.tree[child].w,
+                            n=self.tree[child].n,
+                            c=self.c,
+                            total_n=self.cur_n,
+                            node=child,
+                        )
+                        if child not in restricted_nodes
+                        else -10000
+                        for child in self.tree[node_id].children
+                    ]
                 logging.debug(
                     f"D={self.tree[node_id].game_state.depth} | UCB values: {ucbs}"
                 )
+                if sum(ucbs) < -10000:
+                    if node_id == (0,):
+                        return "END"
+                    restricted_nodes.add(node_id)
+                    leaf_node_id = node_id[:-1]  # go one level back
+                    logging.debug(
+                        f"Going 1 level back: {self.tree[node_id].game_state.path} -> {self.tree[leaf_node_id].game_state.path}"
+                    )
+                    continue
                 action = BiTreeGame.possible_moves[np.argmax(ucbs)]
                 leaf_node_id = node_id + (action,)
         return leaf_node_id
@@ -181,6 +225,8 @@ class MCTS(object):
     def run(self):
         for _ in tqdm(range(self.n_iters)):
             best_node_id = self.selection()
+            if best_node_id == "END":
+                break
             logging.debug(f"Selected node: {self.tree[best_node_id].game_state.path}")
             new_leaf_id = self.expansion(best_node_id)
             logging.debug(f"Expanded node: {self.tree[new_leaf_id].game_state.path}")
