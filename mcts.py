@@ -1,5 +1,7 @@
+from collections import defaultdict
 from dataclasses import dataclass, field
 import logging
+from pprint import pprint, pformat
 from typing import Tuple
 import numpy as np
 from tqdm import tqdm
@@ -24,8 +26,9 @@ class TreeNode(object):
 
 
 class MCTS(object):
-    def __init__(self, game_state, n_iters, c=np.sqrt(2), uct=True):
+    def __init__(self, game_state, n_iters, all_rew_possible, c=np.sqrt(2), uct=True):
         self.all_rewards = list()
+        self.all_rew_possible = all_rew_possible
         self.c = c
         self.n_iters = n_iters
         self.tree: dict[tuple, TreeNode] = dict()
@@ -120,23 +123,35 @@ class MCTS(object):
 
             # get possible moves
             moves = this_game.get_possible_moves()
-        logging.debug
-        (f"Got to the leaf: {this_game.path}, reward={this_game.get_reward()}")
+        logging.debug(
+            f"Got to the leaf: {this_game.path}, reward={this_game.get_reward()}"
+        )
         return this_game.get_reward()
 
     def backpropagation(self, child_node_id: int, reward: int):
-        logging.debug(f"Simulation reward: {reward}")
         node_id = child_node_id
-
+        self.all_rewards.append(reward)
+        if len(self.all_rewards) == 1:
+            win = 0
+        elif reward >= np.max(self.all_rewards):
+            logging.debug(
+                f"{self.tree[node_id].game_state.path} win! {reward} > {np.max(self.all_rewards)}"
+            )
+            win = 1
+        else:
+            logging.debug(
+                f"{self.tree[node_id].game_state.path} loose! {reward} < {np.max(self.all_rewards)}"
+            )
+            win = 0
         while True:
             self.tree[node_id].n += 1
-            self.tree[node_id].w += reward
+            self.tree[node_id].w += win
             self.tree[node_id].q = self.tree[node_id].w / self.tree[node_id].n
             parent_id = self.tree[node_id].parent
 
             if parent_id == (0,):
                 self.tree[parent_id].n += 1
-                self.tree[parent_id].w += reward
+                self.tree[parent_id].w += win
                 self.tree[parent_id].q = self.tree[parent_id].w / self.tree[parent_id].n
                 break
             else:
@@ -156,6 +171,13 @@ class MCTS(object):
         best_q = Q_values[best_action_id]
         return best_move, best_q
 
+    def traverse(self, node_id, data):
+        data[tuple(self.tree[node_id].game_state.path)] += self.tree[node_id].n
+        if not self.tree[node_id].has_children():
+            return
+        for child_id in self.tree[node_id].children:
+            self.traverse(child_id, data)
+
     def run(self):
         for _ in tqdm(range(self.n_iters)):
             best_node_id = self.selection()
@@ -163,7 +185,6 @@ class MCTS(object):
             new_leaf_id = self.expansion(best_node_id)
             logging.debug(f"Expanded node: {self.tree[new_leaf_id].game_state.path}")
             reward = self.simulation(new_leaf_id)
-            logging.debug(f"Simulation reward: {reward}")
             self.backpropagation(new_leaf_id, reward=reward)
             logging.debug(f"Backpropagation done!")
             Q_values = [
@@ -175,5 +196,20 @@ class MCTS(object):
         best_action, best_q = self.choose_best_action()
         logging.debug(f"Best: action={best_action}, q={best_q}")
         Q_values = [self.tree[node].q for node in self.tree[(0,)].children]
+
+        data = defaultdict(int)
+        self.traverse((0,), data)
+        data2 = dict()
+        for k, v in data.items():
+            if k in self.all_rew_possible:
+                reward = self.all_rew_possible[k]
+            else:
+                reward = "-"
+
+            data2[k] = (v, str(reward))
+
+        logging.info(
+            f"------------------------------\nNodes visits:\n{pformat(data2)}\n------------------------------"
+        )
         return best_action, Q_values
 
