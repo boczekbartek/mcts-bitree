@@ -7,6 +7,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numba as nb
+from collections import defaultdict
+import sys
 
 
 class actions:
@@ -90,14 +92,27 @@ def generate_forbidden_state_actions():
 # %%
 FSA = generate_forbidden_state_actions()
 n, e, s, w = [FSA[:, :, i] for i in (0, 1, 2, 3)]
-for action, name in zip((n, e, s, w), ("N (^)", "E (>)", "S (v)", "W (<)")):
-    plt.figure()
-    sns.heatmap(action, linewidths=0.2, square=True, cmap="YlGnBu")
-    plt.xlabel("y")
-    plt.ylabel("x")
-    plt.title(f"Forbidden moves {name}")
-    os.makedirs("img", exist_ok=True)
-    plt.savefig(f"img/FSA-{name[0]}")
+
+walls = np.zeros((n_states_x, n_states_y))
+walls[1, 2:7] = 1
+walls[7, 1:5] = 1
+walls[2:6, 6] = 1
+
+# plt.figure()
+# sns.heatmap(walls, linewidths=0.2, square=True, cmap="YlGnBu")
+# plt.xlabel("y")
+# plt.ylabel("x")
+# plt.title(f"Walls")
+# os.makedirs("img", exist_ok=True)
+# plt.savefig(f"img/walls")
+# for action, name in zip((n, e, s, w), ("N (^)", "E (>)", "S (v)", "W (<)")):
+#     plt.figure()
+#     sns.heatmap(action, linewidths=0.2, square=True, cmap="YlGnBu")
+#     plt.xlabel("y")
+#     plt.ylabel("x")
+#     plt.title(f"Forbidden moves {name}")
+#     os.makedirs("img", exist_ok=True)
+#     plt.savefig(f"img/FSA-{name[0]}")
 # %%
 
 # @nb.njit(cache=True)
@@ -121,17 +136,13 @@ def make_step(x: int, y: int, action: int):
 # @nb.njit(cache=True)
 def choose_action(state_q, exploration_rate):
     """ Choose action using exploration/exploitation. """
-    valid = np.where(state_q > np.NINF)[0]
 
-    if np.sum(state_q[valid]) < 1e-5:
-        exploit = False
-    else:
-        exploration_rate_threshold = np.random.uniform(0, 1)
-        exploit = exploration_rate_threshold > exploration_rate
+    exploration_rate_threshold = np.random.uniform(0, 1)
+    exploit = exploration_rate_threshold > exploration_rate
     if exploit:
         action = np.argmax(state_q)
     else:
-        action = np.random.choice(valid)
+        action = np.random.choice([0, 1, 2, 3])
     return action
 
 
@@ -147,15 +158,18 @@ def do_episode_q_learning(ini_x, ini_y, exploration_rate, q_table):
     x, y = ini_x, ini_y
     # print(f"Exploration rate: {exploration_rate}")
     rewards_cur_episode = 0  # we start with no reweards
-
+    states_visited = np.zeros((n_states_x, n_states_y), dtype=int)
     steps = 0
+    if (x, y) in absorbing:
+        return steps, rewards_cur_episode, states_visited
     for _ in range(max_steps_per_epidode):
+        states_visited[(x, y)] += 1
         state_q = q_table[x, y, :]
         action = choose_action(state_q, exploration_rate)
 
         nx, ny = make_step(x, y, action)
 
-        reward = reward_fun[x, y] if nx == x and ny == y else reward_fun[nx, ny]
+        reward = reward_fun[nx, ny]
 
         q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
             reward + discount_rate * np.max(q_table[nx, ny, :])
@@ -170,26 +184,30 @@ def do_episode_q_learning(ini_x, ini_y, exploration_rate, q_table):
 
         x, y = nx, ny
 
-    return steps, rewards_cur_episode
+    return steps, rewards_cur_episode, states_visited
 
 
 def do_episode_sarsa(ini_x, ini_y, exploration_rate, q_table):
-    """ Perform episode of Q-Learning """
+    """ Perform episode of SARSA """
     x, y = ini_x, ini_y
+
     # print(f"Exploration rate: {exploration_rate}")
     rewards_cur_episode = 0  # we start with no reweards
-
+    states_visited = np.zeros((n_states_x, n_states_y), dtype=int)
     steps = 0
+    if (x, y) in absorbing:
+        return steps, rewards_cur_episode, states_visited
     state_q = q_table[x, y, :]
     action = choose_action(state_q, exploration_rate)
     for _ in range(max_steps_per_epidode):
-
+        states_visited[x, y] += 1
         nx, ny = make_step(x, y, action)
-        reward = reward_fun[x, y] if nx == x and ny == y else reward_fun[nx, ny]
+        reward = reward_fun[nx, ny]
 
-        next_action = choose_action(state_q, exploration_rate)
+        next_state_q = q_table[nx, ny, :]
+        next_action = choose_action(next_state_q, exploration_rate)
 
-        q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
+        q_table[x, y, action] = q_table[x, y, action] * (1 - lr) + lr * (
             reward + discount_rate * q_table[nx, ny, next_action]
         )
 
@@ -202,9 +220,9 @@ def do_episode_sarsa(ini_x, ini_y, exploration_rate, q_table):
 
         x, y = nx, ny
         action = next_action
-        state_q = q_table[x, y, :]
+        state_q = next_state_q
 
-    return steps, rewards_cur_episode
+    return steps, rewards_cur_episode, states_visited
 
 
 # @nb.njit(cache=True)
@@ -214,7 +232,7 @@ def simulate(q_table, xs, ys, debug=False):
 
     steps = 0
     reward = 0
-    for _ in range(1000):
+    for _ in range(30):
         x, y = current_pos
         env_map[x, y] += 1
         state_q = q_table[x, y, :]
@@ -243,7 +261,8 @@ def simulate(q_table, xs, ys, debug=False):
 
 
 # @nb.njit(cache=True)
-def learn(algorithm):
+def learn(algorithm, n_episodes, show_progress, debug, eps_start):
+    states_visited_overall = np.zeros((n_states_x, n_states_y))
     q_table = np.zeros((n_states_x, n_states_y, n_actions))
 
     exploration_rate = max_exploration_rate
@@ -259,12 +278,24 @@ def learn(algorithm):
     else:
         raise AssertionError(f"Algorithm not supported: {algorithm}")
 
+    progress = np.zeros(n_episodes, dtype=int)
     # while avg_R < 100:
-    for episode in range(n_episodes):
-        x = np.random.randint(0, n_states_x - 1)
-        y = np.random.randint(0, n_states_y - 1)
-        # x, y = (0, 0)
-        steps, rewards_cur_episode = do_episode(x, y, exploration_rate, q_table)
+    it = range(n_episodes)
+    if show_progress:
+        it = tqdm(it, desc=algorithm)
+    for episode in it:
+        if eps_start == "random":
+            while True:
+                # find valid initial state
+                x = np.random.randint(0, n_states_x - 1)
+                y = np.random.randint(0, n_states_y - 1)
+                if walls[(x, y)] != 1:
+                    break
+        else:
+            x, y = eps_start
+        steps, rewards_cur_episode, states_visited = do_episode(
+            x, y, exploration_rate, q_table
+        )
         travel_times[episode] = steps
         rewards_all_episodes[episode] = rewards_cur_episode
 
@@ -279,135 +310,187 @@ def learn(algorithm):
             avg_S = np.sum(travel_times[episode - 100 : episode]) / 100
         # exp, stp = count_expected_time(q_table, 0, 0, 1, 10)
 
-        print(
-            "Algorithm:",
-            algorithm,
-            "Episode:",
-            episode,
-            "| eps =",
-            exploration_rate,
-            "| R =",
-            round(rewards_cur_episode, 2),
-            "| S =",
-            steps,
-            "| avg_R =",
-            round(avg_R, 4),
-            "| avg_S =",
-            round(avg_S, 4),
-        )
+        reward, steps_to_goal, game_map = simulate(q_table, 0, 0, debug=True)
+        progress[episode] = reward
+        states_visited_overall = np.add(states_visited_overall, states_visited)
+        if debug:
+            print(states_visited)
+            print(
+                "Algorithm:",
+                algorithm,
+                "Episode:",
+                episode,
+                "| eps =",
+                exploration_rate,
+                "| R =",
+                round(rewards_cur_episode, 2),
+                "| S =",
+                steps,
+                "| avg_R =",
+                round(avg_R, 4),
+                "| avg_S =",
+                round(avg_S, 4),
+            )
+    if debug:
+        print("Overall visited")
+        print(states_visited_overall)
+    return rewards_all_episodes, travel_times, q_table, progress, states_visited_overall
 
-    return rewards_all_episodes, travel_times, q_table
+
+# def rolling_average(x, w):
+#     return np.convolve(x, np.ones(w), "valid") / w
 
 
 def rolling_average(x, w):
-    return np.convolve(x, np.ones(w), "valid") / w
+    res = [x[0]]
+    for i in range(1, len(x)):
+        if i < w:
+            res.append(np.mean(x[:i]))
+        else:
+            xx = x[i - w : i]
+            res.append(np.mean(xx))
+    return res
 
 
-def save_plots(rewards_all_episodes, travel_times, q_table):
-    suf = "_dist" if USE_DIST == True else ""
+def generate_equiprobable_policy(ini_state=(0, 0), maxlen=1e6):
+    actions = [0, 1, 2, 3]
+    x, y = ini_state
+    policy = []
+    while True:
+        action = np.random.choice(actions)
+        policy.append(action)
+        nx, ny = make_step(x, y, action=action)
+        if (nx, ny) in absorbing or len(policy) >= maxlen:
+            break
+        x, y = nx, ny
+    return policy
 
-    n, e, s, w = [q_table[:, :, i] for i in (0, 1, 2, 3)]
-    for action, name in zip((n, e, s, w), "NESW"):
-        plt.figure()
-        sns.heatmap(action, square=True)
-        plt.title(f"Q-table {name}")
-        plt.xlabel("y")
-        plt.ylabel("x")
-        os.makedirs("img", exist_ok=True)
-        plt.savefig(f"img/q_table-{name}" + suf)
 
-    q_table_cum = np.sum(q_table, axis=2)
-    plt.figure()
-    sns.heatmap(q_table_cum, square=True)
-    plt.xlabel("y")
-    plt.ylabel("x")
+def simulate_policy(ini_state, policy):
+    states, rewards = list(), list()
+    x, y = ini_state
+    # states.append((x, y))
+    # rewards.append(reward_fun[x, y])
+    for action in policy:
+        nx, ny = make_step(x, y, action=action)
+        reward = reward_fun[nx, ny]
+        states.append((nx, ny))
+        rewards.append(reward)
+        x, y = nx, ny
+    return states, rewards
 
-    plt.title(f"Q-table cum")
-    os.makedirs("img", exist_ok=True)
-    plt.savefig(f"img/q_table-cum" + suf)
 
-    spl = n_episodes / 10
-    reward_per_thousand_episodes = np.split(
-        np.array(rewards_all_episodes), n_episodes / spl
-    )
-    # times_per_thousand_episodes = np.split(np.array(travel_times), n_episodes / spl)
-    # cnt = spl
-    # print("Iters :       avg reward     | avg steps to goal")
-    # for r, tr in zip(reward_per_thousand_episodes, times_per_thousand_episodes):
-    #     print(cnt, ": ", str(sum(r / spl)), "|", str(sum(tr / spl)))
-    #     cnt += spl
+def mcts_policy_evaluation(first_visit, n_steps=1000, gamma=1):
+    """ No discounting as default """
 
-    plt.figure()
-    plt.plot(rolling_average(travel_times, 50))
-    plt.title("Travel time rolling average from 50 episodes")
-    plt.xlabel("Episode")
-    plt.ylabel("50-avg travel time")
+    returns = defaultdict(list)
+    V = np.zeros(shape=(n_states_x, n_states_y))
 
-    os.makedirs("img", exist_ok=True)
-    plt.savefig("img/travel_time" + suf)
+    for i in tqdm(
+        range(n_steps), desc=f"{'FV' if first_visit else 'EV'}, gamma={gamma}"
+    ):
+        while True:
+            # find valid initial state
+            x = np.random.randint(0, n_states_x - 1)
+            y = np.random.randint(0, n_states_y - 1)
+            if walls[(x, y)] != 1:
+                break
 
-    plt.figure()
-    plt.plot(rolling_average(rewards_all_episodes, 50))
-    plt.title("Reward rolling average from 50 episodes")
-    plt.xlabel("Episode")
-    plt.ylabel("50-avg reward")
+        policy = generate_equiprobable_policy(ini_state=(x, y))
+        states, rewards = simulate_policy(ini_state=(x, y), policy=policy)
+        cum_rew = 0
+        for i, (state, r) in enumerate(zip(states[::-1], rewards[::-1])):
+            cum_rew = gamma * cum_rew + r
+            # print(
+            #     f"{len(states)-i} | State: {state}, reward: {r}, cum reward: {cum_rew}"
+            # )
+            if first_visit:
+                if (
+                    state not in states[: -(i + 1)]
+                ):  # TODO searching in a list, do some hashtable way, bc this is slow AF
+                    # print(f"{state} is first visited, because not in: {states[:-i]}")
+                    returns[state].append(cum_rew)
+            else:
+                returns[state].append(cum_rew)
 
-    os.makedirs("img", exist_ok=True)
-    plt.savefig("img/reward" + suf)
-    n, e, s, w = [M[:, :, i] for i in (0, 1, 2, 3)]
-    for action, name in zip((n, e, s, w), "NESW"):
-        plt.figure()
-        sns.heatmap(action, square=True)
-        plt.xlabel("y")
-        plt.ylabel("x")
-        plt.title(f"Congestion prob {name}")
-        os.makedirs("img", exist_ok=True)
-        plt.savefig(f"img/M-{name}" + suf)
+    for state, returns in returns.items():
+        V[state] = np.average(returns)
 
-    eps = [
-        get_explotation_rate(
-            min_exploration_rate, max_exploration_rate, exploration_decay_rate, i
-        )
-        for i in range(n_episodes)
-    ]
-    plt.figure()
-    plt.title("Exploration rate")
-    plt.plot(eps)
-    plt.xlabel("Episode")
-    plt.savefig("img/eps" + suf)
-
-    plt.figure()
-    sns.heatmap(reward_fun, square=True)
-    plt.xlabel("y")
-    plt.ylabel("x")
-    plt.title("Reward")
-    plt.savefig("img/reward_fun" + suf)
+    return V
 
 
 if __name__ == "__main__":
-    import argparse
+    # for gamma in np.arange(0.1, 1.1, 0.1):
+    #     gamma = round(gamma, 1)
+    #     for fv in (True, False):
+    #         V_star = mcts_policy_evaluation(n_steps=1000, first_visit=fv, gamma=gamma)
+    #         fv_str = "fv" if fv else "ev"
+    #         fv_str_long = "first visit" if fv else "every visit"
+    #         plt.figure(figsize=(10, 10))
+    #         sns.heatmap(V_star, square=True, annot=True, cmap="YlGnBu", fmt=".2f")
+    #         plt.title(f"V* from MCTS policy evalutaion - {fv_str_long}")
+    #         plt.xlabel("y")
+    #         plt.ylabel("x")
+    #         os.makedirs("img", exist_ok=True)
+    #         plt.savefig(f"img/v_star-msct_pe_{fv_str}-gamma_{gamma}.png")
+    plot = False
+    progresses = list()
+    algorithms = ("SARSA", "Q")
+    show_progress = False
+    debug = True
+    eps_start = "random"
+    for algorithm in algorithms:
 
-    p = argparse.ArgumentParser()
-    p.add_argument("--algorithm", "-a", choices=("Q", "SARSA"), required=True)
-    args = p.parse_args()
-    algorithm = args.algorithm
+        ts = time.time()
+        (
+            rewards_all_episodes,
+            travel_times,
+            q_table,
+            progress,
+            states_visited_overall,
+        ) = learn(
+            algorithm,
+            n_episodes=1000,
+            show_progress=show_progress,
+            debug=debug,
+            eps_start=eps_start,
+        )
 
-    ts = time.time()
-    rewards_all_episodes, travel_times, q_table = learn(algorithm)
-    print(f"{algorithm}-learning finished in: {time.time() - ts}")
+        progresses.append(progress)
+        print(f"{algorithm}-learning finished in: {time.time() - ts}")
 
-    reward, steps, game_map = simulate(q_table, 0, 0, debug=True)
-    print(reward)
-    print(steps)
+        reward, steps, game_map = simulate(q_table, 0, 0, debug=True)
+        print(f"Reached goal in {steps} steps")
+        if plot:
+            plt.figure()
+            sns.heatmap(game_map, linewidths=0.2, square=True, cmap="YlGnBu")
+            plt.xlabel("y")
+            plt.ylabel("x")
+            plt.title(f"{algorithm}-learning Policy")
+            os.makedirs("img", exist_ok=True)
+            plt.savefig(f"img/{algorithm}-policy")
 
-    # np.save("q-table.npy", q_table)
-    plt.figure()
-    sns.heatmap(game_map, linewidths=0.2, square=True, cmap="YlGnBu")
-    plt.xlabel("y")
-    plt.ylabel("x")
-    plt.title(f"{algorithm}-learning Policy")
-    os.makedirs("img", exist_ok=True)
-    plt.savefig(f"img/{algorithm}-policy")
-    # save_plots(rewards_all_episodes, travel_times, q_table)
+            plt.figure()
+            sns.heatmap(
+                states_visited_overall, linewidths=0.2, square=True, cmap="YlGnBu"
+            )
+            plt.xlabel("y")
+            plt.ylabel("x")
+            plt.title(
+                f"{algorithm}-learning heatmap of learning, {eps_start} episode start"
+            )
+            os.makedirs("img", exist_ok=True)
+            plt.savefig(f"img/{algorithm}-policy-{'.'.join(eps_start)}")
 
+    if plot:
+        plt.figure()
+        for progress, algorithm in zip(progresses, algorithms):
+            plt.plot(rolling_average(progress, 20))
+            # plt.plot(progress)
+        plt.legend(algorithms)
+        plt.xlabel("episode")
+        plt.ylabel("steps to terminal")
+        plt.title(f"Learnig Curve 50 rol avg")
+        os.makedirs("img", exist_ok=True)
+        plt.savefig(f"img/learning_curve")
 # %%
