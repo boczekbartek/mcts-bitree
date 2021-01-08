@@ -170,15 +170,17 @@ def do_episode_q_learning(ini_x, ini_y, exploration_rate, q_table):
         nx, ny = make_step(x, y, action)
 
         reward = reward_fun[nx, ny]
-
-        q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
-            reward + discount_rate * np.max(q_table[nx, ny, :])
-        )
+        done = (nx, ny) in absorbing
+        if done:
+            q_table[x, y, action] = state_q[action] + lr * (reward - state_q[action])
+        else:
+            q_table[x, y, action] = state_q[action] * (1 - lr) + lr * (
+                reward + discount_rate * np.max(q_table[nx, ny, :])
+            )
 
         rewards_cur_episode += reward
         steps += 1
 
-        done = (nx, ny) in absorbing
         if done:
             break
 
@@ -203,18 +205,22 @@ def do_episode_sarsa(ini_x, ini_y, exploration_rate, q_table):
         states_visited[x, y] += 1
         nx, ny = make_step(x, y, action)
         reward = reward_fun[nx, ny]
+        done = (nx, ny) in absorbing
 
         next_state_q = q_table[nx, ny, :]
         next_action = choose_action(next_state_q, exploration_rate)
-
-        q_table[x, y, action] = q_table[x, y, action] * (1 - lr) + lr * (
-            reward + discount_rate * q_table[nx, ny, next_action]
-        )
+        if done:
+            q_table[x, y, action] = q_table[x, y, action] + lr * (
+                reward - q_table[x, y, action]
+            )
+        else:
+            q_table[x, y, action] = q_table[x, y, action] * (1 - lr) + lr * (
+                reward + discount_rate * q_table[nx, ny, next_action]
+            )
 
         rewards_cur_episode += reward
         steps += 1
 
-        done = (nx, ny) in absorbing
         if done:
             break
 
@@ -232,7 +238,7 @@ def simulate(q_table, xs, ys, debug=False):
 
     steps = 0
     reward = 0
-    for _ in range(30):
+    for _ in range(100):
         x, y = current_pos
         env_map[x, y] += 1
         state_q = q_table[x, y, :]
@@ -310,7 +316,7 @@ def learn(algorithm, n_episodes, show_progress, debug, eps_start):
             avg_S = np.sum(travel_times[episode - 100 : episode]) / 100
         # exp, stp = count_expected_time(q_table, 0, 0, 1, 10)
 
-        reward, steps_to_goal, game_map = simulate(q_table, 0, 0, debug=True)
+        reward, steps_to_goal, game_map = simulate(q_table, 0, 0, debug=False)
         progress[episode] = reward
         states_visited_overall = np.add(states_visited_overall, states_visited)
         if debug:
@@ -433,12 +439,15 @@ if __name__ == "__main__":
     #         plt.ylabel("x")
     #         os.makedirs("img", exist_ok=True)
     #         plt.savefig(f"img/v_star-msct_pe_{fv_str}-gamma_{gamma}.png")
-    plot = False
+    plot = True
     progresses = list()
     algorithms = ("SARSA", "Q")
-    show_progress = False
-    debug = True
-    eps_start = "random"
+    show_progress = True
+    debug = False
+    eps_start = "random"  # random or tuple(x,y)
+    img_dir = f"img{sys.argv[1]}"
+    if plot:
+        os.makedirs(img_dir, exist_ok=True)
     for algorithm in algorithms:
 
         ts = time.time()
@@ -467,8 +476,7 @@ if __name__ == "__main__":
             plt.xlabel("y")
             plt.ylabel("x")
             plt.title(f"{algorithm}-learning Policy")
-            os.makedirs("img", exist_ok=True)
-            plt.savefig(f"img/{algorithm}-policy")
+            plt.savefig(f"{img_dir}/{algorithm}-policy")
 
             plt.figure()
             sns.heatmap(
@@ -479,18 +487,33 @@ if __name__ == "__main__":
             plt.title(
                 f"{algorithm}-learning heatmap of learning, {eps_start} episode start"
             )
-            os.makedirs("img", exist_ok=True)
-            plt.savefig(f"img/{algorithm}-policy-{'.'.join(eps_start)}")
+            if eps_start == "random":
+                plt.savefig(f"{img_dir}/{algorithm}-learn-heatmap-{eps_start}.png")
+            else:
+                plt.savefig(
+                    f"{img_dir}/{algorithm}-learn-heatmap-{'.'.join(eps_start)}.png"
+                )
+            n, e, s, w = [q_table[:, :, i] for i in (0, 1, 2, 3)]
+            for action, name in zip((n, e, s, w), "NESW"):
+                plt.figure()
+                sns.heatmap(action, square=True)
+                plt.title(f"Q-table {name}")
+                plt.xlabel("y")
+                plt.ylabel("x")
+                if eps_start == "random":
+                    plt.savefig(f"{img_dir}/{algorithm}-Q_table_{name}-{eps_start}.png")
+                else:
+                    plt.savefig(
+                        f"{img_dir}/{algorithm}-Q_table_{name}-{'.'.join(eps_start)}.png"
+                    )
 
     if plot:
         plt.figure()
         for progress, algorithm in zip(progresses, algorithms):
             plt.plot(rolling_average(progress, 20))
-            # plt.plot(progress)
         plt.legend(algorithms)
         plt.xlabel("episode")
         plt.ylabel("steps to terminal")
         plt.title(f"Learnig Curve 50 rol avg")
-        os.makedirs("img", exist_ok=True)
-        plt.savefig(f"img/learning_curve")
+        plt.savefig(f"{img_dir}/learning_curve")
 # %%
