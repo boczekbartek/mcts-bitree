@@ -54,3 +54,26 @@ plt.savefig(f"{plots_dir}/csmall")
 
 
 # %%
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+
+plots_dir = "mcts_plots"
+os.makedirs(plots_dir, exist_ok=True)
+log1 = "test_c_param1.sh.log"
+log = "test_c_param.sh.log"
+df1 = pd.read_csv(log, sep="\t", header=None)
+dfsm = pd.read_csv(log1, sep="\t", header=None)
+df = pd.concat([dfsm, df1])
+df.columns = ["c", "win", "gap"]
+df[df["c"] == 13].describe()
+
+
+# %%
+
+plt.figure(figsize=(10, 10))
+df[df.win == "W"].drop("gap", axis=1).groupby(by="c").count().plot(style='o')
+plt.title("Number of wins for different C parameters")
+plt.ylabel('Wins')
+plt.savefig(f"{plots_dir}/C_wins")
+# %%

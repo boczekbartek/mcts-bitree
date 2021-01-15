@@ -4,6 +4,7 @@ from pickle import TRUE
 import time
 from tqdm import tqdm
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numba as nb
@@ -39,7 +40,6 @@ discount_rate = 0.99
 max_exploration_rate = 1.0
 min_exploration_rate = 0.01
 exploration_decay_rate = 1.0 / n_episodes
-USE_DIST = False
 
 reward_fun = np.ones((n_states_x, n_states_y), dtype=np.float64) * move_reward
 for (x, y), reward in absorbing.items():
@@ -98,22 +98,21 @@ walls[1, 2:7] = 1
 walls[7, 1:5] = 1
 walls[2:6, 6] = 1
 
-# plt.figure()
-# sns.heatmap(walls, linewidths=0.2, square=True, cmap="YlGnBu")
-# plt.xlabel("y")
-# plt.ylabel("x")
-# plt.title(f"Walls")
-# os.makedirs("img", exist_ok=True)
-# plt.savefig(f"img/walls")
-# for action, name in zip((n, e, s, w), ("N (^)", "E (>)", "S (v)", "W (<)")):
-#     plt.figure()
-#     sns.heatmap(action, linewidths=0.2, square=True, cmap="YlGnBu")
-#     plt.xlabel("y")
-#     plt.ylabel("x")
-#     plt.title(f"Forbidden moves {name}")
-#     os.makedirs("img", exist_ok=True)
-#     plt.savefig(f"img/FSA-{name[0]}")
-# %%
+plt.figure()
+sns.heatmap(walls, linewidths=0.2, square=True, cmap="YlGnBu")
+plt.xlabel("y")
+plt.ylabel("x")
+plt.title(f"Walls")
+os.makedirs("img", exist_ok=True)
+plt.savefig(f"img/walls")
+for action, name in zip((n, e, s, w), ("N (^)", "E (>)", "S (v)", "W (<)")):
+    plt.figure()
+    sns.heatmap(action, linewidths=0.2, square=True, cmap="YlGnBu")
+    plt.xlabel("y")
+    plt.ylabel("x")
+    plt.title(f"Forbidden moves {name}")
+    os.makedirs("img", exist_ok=True)
+    plt.savefig(f"img/FSA-{name[0]}")
 
 # @nb.njit(cache=True)
 def make_step(x: int, y: int, action: int):
@@ -425,20 +424,38 @@ def mcts_policy_evaluation(first_visit, n_steps=1000, gamma=1):
     return V
 
 
+def get_directions(Q):
+    directions = np.zeros((n_states_x, n_states_y))
+    annot = np.zeros((n_states_x, n_states_y), dtype=object)
+    dirs = {0: "^", 1: ">", 2: "v", 3: "<"}
+
+    for x in range(n_states_x):
+        for y in range(n_states_y):
+            directions[x, y] = np.argmax(Q[x, y])
+            annot[x, y] = dirs[np.argmax(Q[x, y])]
+    return directions, annot
+
+
 if __name__ == "__main__":
-    # for gamma in np.arange(0.1, 1.1, 0.1):
-    #     gamma = round(gamma, 1)
-    #     for fv in (True, False):
-    #         V_star = mcts_policy_evaluation(n_steps=1000, first_visit=fv, gamma=gamma)
-    #         fv_str = "fv" if fv else "ev"
-    #         fv_str_long = "first visit" if fv else "every visit"
-    #         plt.figure(figsize=(10, 10))
-    #         sns.heatmap(V_star, square=True, annot=True, cmap="YlGnBu", fmt=".2f")
-    #         plt.title(f"V* from MCTS policy evalutaion - {fv_str_long}")
-    #         plt.xlabel("y")
-    #         plt.ylabel("x")
-    #         os.makedirs("img", exist_ok=True)
-    #         plt.savefig(f"img/v_star-msct_pe_{fv_str}-gamma_{gamma}.png")
+    font = {"size": 16}
+
+    matplotlib.rc("font", **font)
+    for gamma in (0.7, 0.99):
+        for fv in (True, False):
+            V_star = mcts_policy_evaluation(n_steps=1000, first_visit=fv, gamma=gamma)
+            fv_str = "fv" if fv else "ev"
+            fv_str_long = "first visit" if fv else "every visit"
+            plt.figure(figsize=(10, 10))
+            sns.heatmap(V_star, square=True, annot=True, cmap="YlGnBu", fmt=".2f")
+            plt.title(f"V - MCTS PE - {fv_str_long}, gamma={gamma}")
+            plt.xlabel("y")
+            plt.ylabel("x")
+            os.makedirs("img", exist_ok=True)
+            plt.savefig(f"img/v_star-msct_pe_{fv_str}-gamma_{gamma}.png")
+
+    font = {"size": 12}
+    matplotlib.rc("font", **font)
+
     plot = True
     progresses = list()
     algorithms = ("SARSA", "Q")
@@ -471,6 +488,22 @@ if __name__ == "__main__":
         reward, steps, game_map = simulate(q_table, 0, 0, debug=True)
         print(f"Reached goal in {steps} steps")
         if plot:
+            directions, annot = get_directions(q_table)
+
+            plt.figure()
+            sns.heatmap(
+                directions,
+                linewidths=0.2,
+                square=True,
+                cmap="YlGnBu",
+                annot=annot,
+                fmt="",
+            )
+            plt.xlabel("y")
+            plt.ylabel("x")
+            plt.title(f"{algorithm}-learning policy")
+            plt.savefig(f"{img_dir}/{algorithm}-directions")
+
             plt.figure()
             sns.heatmap(game_map, linewidths=0.2, square=True, cmap="YlGnBu")
             plt.xlabel("y")

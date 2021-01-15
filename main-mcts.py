@@ -75,15 +75,13 @@ def main(
     logging.info(
         f"Explored nodes: {len(all_rewards)}, Reward: {reward}, Max possible reward: {max_possible_reward}, reward_gap: {reward_gap}, Path: {path}"
     )
-    print(c, "W" if win else "L", str(reward_gap), sep="\t")
+    print(n_rollouts, "W" if win else "L", str(reward_gap), sep="\t")
 
     return max_possible_reward - reward
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(
-        description="Monte Carlo Tree Search on binary-tree."
-    )
+    p = argparse.ArgumentParser(description="Monte Carlo Tree Search on binary-tree.")
     p.add_argument(
         "--n-rollouts",
         required=True,
