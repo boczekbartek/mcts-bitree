@@ -69,42 +69,25 @@ class MCTS(object):
                     f"Node has no children: {self.tree[node_id].game_state.path}"
                 )
             else:
-
-                if any(
-                    not self.tree[child].has_children()
+                visits = [
+                    (self.tree[child].game_state.path, self.tree[child].n)
                     for child in self.tree[node_id].children
-                ):
-                    visits = [
-                        (self.tree[child].game_state.path, self.tree[child].n)
-                        for child in self.tree[node_id].children
-                    ]
-                    logging.debug(f"Leafes visits: {visits}")
-                    ucbs = [
-                        self.ucb(
-                            w=self.tree[child].w,
-                            n=self.tree[child].n,
-                            c=self.c,
-                            total_n=self.cur_n,
-                            node=child,
-                        )
-                        if self.tree[child].n <= self.max_leaf_selections
-                        and child not in restricted_nodes
-                        else -10000
-                        for child in self.tree[node_id].children
-                    ]
-                else:
-                    ucbs = [
-                        self.ucb(
-                            w=self.tree[child].w,
-                            n=self.tree[child].n,
-                            c=self.c,
-                            total_n=self.cur_n,
-                            node=child,
-                        )
-                        if child not in restricted_nodes
-                        else -10000
-                        for child in self.tree[node_id].children
-                    ]
+                ]
+                logging.debug(f"Leafes visits: {visits}")
+                ucbs = [
+                    self.ucb(
+                        w=self.tree[child].w,
+                        n=self.tree[child].n,
+                        c=self.c,
+                        total_n=self.cur_n,
+                        node=child,
+                    )
+                    if self.tree[child].n <= self.max_leaf_selections
+                    and child not in restricted_nodes
+                    else -10000
+                    for child in self.tree[node_id].children
+                ]
+
                 logging.debug(
                     f"D={self.tree[node_id].game_state.depth} | UCB values: {ucbs}"
                 )

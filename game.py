@@ -1,24 +1,12 @@
-import numpy as np
-
-
 class BiTreeGame:
     possible_moves = ("R", "L")
 
     def __init__(self, max_depth, all_rewards) -> None:
-        self.path = [0]
+        self.path = [0]  # path always starts with root node
         self.all_rewards = all_rewards
         self.depth = 0
         self.max_depth = max_depth
         self.reward = None
-
-    def set(self, key, value):
-        self.values[key] = value
-
-    def get(self, key):
-        return self.values[key]
-
-    def exists(self, key) -> bool:
-        return key in self.values
 
     def is_finished(self):
         return self.depth == self.max_depth
